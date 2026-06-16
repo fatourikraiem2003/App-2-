@@ -1190,32 +1190,6 @@ async function init(){
   setTimeout(()=>{document.getElementById('splash').classList.add('hide');setTimeout(()=>document.getElementById('splash').style.display='none',400);},1800);
 }
 init();
-  const GIST_ID = 38e4ac9e5de5dc4d7e8c330f0a0a7a90;
-const TOKEN = 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; // anyone viewing page source can see this
-const FILENAME = cmms_data.json;
-
-async function loadData() {
-  const res = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
-    headers: {
-      Authorization: `Bearer ${TOKEN}`,
-      Accept: "application/vnd.github+json"
-    }
-  });
-  const gist = await res.json();
-  return JSON.parse(gist.files[FILENAME].content);
-}
-
-async function saveData(data) {
-  await fetch(`https://api.github.com/gists/${GIST_ID}`, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${TOKEN}`,
-      Accept: "application/vnd.github+json",
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ files: { [FILENAME]: { content: JSON.stringify(data, null, 2) } } })
-  });
-}
 </script>
 </body>
 </html>
