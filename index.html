@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -499,6 +498,16 @@ tr:hover td{background:var(--surface2)}
     <div class="fg"><label class="fl">Site</label><input class="fi" value="GCT — Usine Acide Phosphorique" id="s-site"></div>
     <div class="fg"><label class="fl">Mon nom (pour les notifications)</label><input class="fi" id="s-myname" placeholder="Ex: Haithem Talbi"></div>
     <hr class="sep">
+    <!-- ▼▼▼ LIGNE PAT — COLLER VOTRE TOKEN ICI OU VIA LE CHAMP ▼▼▼ -->
+    <div class="fg">
+      <label class="fl">🔑 GitHub Token (PAT) — Fil d'activités partagé</label>
+      <input class="fi" id="s-pat" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+             value="" oninput="">
+      <div class="mono dim mt8" style="font-size:9px">Stocké uniquement dans votre navigateur. Nécessaire pour écrire dans le fil partagé.</div>
+    </div>
+    <button class="btn btn-outline btn-full" onclick="savePAT()"><i class="ti ti-key"></i> Enregistrer le token</button>
+    <!-- ▲▲▲ FIN ZONE PAT ▲▲▲ -->
+    <hr class="sep">
     <button class="btn btn-danger btn-full" onclick="clearAll()"><i class="ti ti-trash"></i> Réinitialiser toutes les données</button>
     <div class="mono dim mt8" style="text-align:center;font-size:9px">CMMS v3.0 · GCT · Fitouri Kraiem & Haithem Talbi</div>
   </div>
@@ -506,9 +515,42 @@ tr:hover td{background:var(--surface2)}
 
 <script>
 const DB='gct_cmms3';
-const FEED_KEY='gct_feed';
 let myName='Équipe';
 let lastFeedCount=0;
+
+// ═══════════════════════════════════════════════════════════
+// GITHUB GIST DATABASE CONFIG
+// ── You only need to fill in GIST_ID below ──────────────
+// ── Your PAT is entered once via the Settings screen ────
+// ═══════════════════════════════════════════════════════════
+const GIST_ID = 'f3fa2c9cee3d570f02cbaa00c89984ac'; // ← YOUR GIST ID (already set)
+const GIST_FILE = 'db.json';                          // ← must match your Gist filename exactly
+
+function getPAT(){return localStorage.getItem('gct_pat')||'';}
+
+async function gistRead(){
+  const pat=getPAT();
+  const headers={'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'};
+  if(pat)headers['Authorization']='Bearer '+pat;
+  const r=await fetch('https://api.github.com/gists/'+GIST_ID,{headers,cache:'no-store'});
+  if(!r.ok)throw new Error('Gist read failed: '+r.status);
+  const g=await r.json();
+  const raw=g.files[GIST_FILE]&&g.files[GIST_FILE].content;
+  if(!raw)throw new Error('Fichier '+GIST_FILE+' introuvable dans le Gist');
+  return JSON.parse(raw);
+}
+
+async function gistWrite(data){
+  const pat=getPAT();
+  if(!pat){console.warn('PAT manquant — écriture Gist ignorée');return;}
+  const r=await fetch('https://api.github.com/gists/'+GIST_ID,{
+    method:'PATCH',
+    headers:{'Accept':'application/vnd.github+json','Authorization':'Bearer '+pat,'Content-Type':'application/json','X-GitHub-Api-Version':'2022-11-28'},
+    body:JSON.stringify({files:{[GIST_FILE]:{content:JSON.stringify(data,null,2)}}})
+  });
+  if(!r.ok){const e=await r.json();throw new Error('Gist write failed '+r.status+': '+e.message);}
+}
+// ═══════════════════════════════════════════════════════════
 
 let st={
   interventions:[],anomalies:[],planEvents:[],
@@ -526,29 +568,24 @@ function today(){return new Date().toISOString().split('T')[0]}
 function fdate(d){return d?new Date(d+'T00:00:00').toLocaleDateString('fr-FR'):''}
 function fname(){return (document.getElementById('s-myname')||{}).value||myName||'Équipe'}
 
-// SHARED FEED
+// SHARED FEED — backed by GitHub Gist
 async function addFeedEntry(action, detail, type='default'){
   const entry={id:uid(),who:fname(),action,detail,type,ts:Date.now(),seen:false};
   try{
-    const r=await window.storage.get(FEED_KEY,true);
-    const arr=r?JSON.parse(r.value):[];
-    arr.unshift(entry);
-    if(arr.length>100)arr.length=100;
-    await window.storage.set(FEED_KEY,JSON.stringify(arr),true);
-  }catch(e){
-    try{
-      const arr=[entry];
-      await window.storage.set(FEED_KEY,JSON.stringify(arr),true);
-    }catch(e2){}
-  }
+    let data=await gistRead().catch(()=>({feed:[]}));
+    if(!Array.isArray(data.feed))data.feed=[];
+    data.feed.unshift(entry);
+    if(data.feed.length>100)data.feed.length=100;
+    await gistWrite(data);
+  }catch(e){console.warn('addFeedEntry error',e);}
   renderFeed();
   updateNotifBadge();
 }
 
 async function getFeed(){
   try{
-    const r=await window.storage.get(FEED_KEY,true);
-    return r?JSON.parse(r.value):[];
+    const data=await gistRead();
+    return Array.isArray(data.feed)?data.feed:[];
   }catch(e){return[];}
 }
 
@@ -594,10 +631,22 @@ async function updateNotifBadge(){
 
 async function clearFeed(){
   if(!confirm('Vider le fil d\'activités ?'))return;
-  try{await window.storage.delete(FEED_KEY,true);}catch(e){}
+  try{
+    const data=await gistRead().catch(()=>({feed:[]}));
+    data.feed=[];
+    await gistWrite(data);
+  }catch(e){console.warn('clearFeed error',e);}
   renderFeed('feed-full');
   renderFeed('dash-feed',3);
   document.getElementById('notif-count').style.display='none';
+}
+
+// PAT save from settings screen
+function savePAT(){
+  const v=(document.getElementById('s-pat')||{}).value||'';
+  if(v&&!v.startsWith('ghp_')){toast('Token invalide — doit commencer par ghp_');return;}
+  localStorage.setItem('gct_pat',v);
+  toast(v?'Token GitHub enregistré ✓':'Token effacé');
 }
 
 // NAVIGATION
@@ -615,7 +664,13 @@ function showPage(name,btn){
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200)}
 
 // MODALS
-function openModal(id){document.getElementById(id).classList.add('open')}
+function openModal(id){
+  document.getElementById(id).classList.add('open');
+  if(id==='m-settings'){
+    const p=document.getElementById('s-pat');
+    if(p)p.value=getPAT();
+  }
+}
 function closeModal(id){document.getElementById(id).classList.remove('open')}
 document.querySelectorAll('.mb').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')}));
 
